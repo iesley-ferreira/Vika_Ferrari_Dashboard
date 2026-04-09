@@ -65,7 +65,7 @@ export default function ConfiguracoesPage() {
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .single() as { data: Profile | null; error: unknown };
 
       if (data) {
         setProfile(data);
