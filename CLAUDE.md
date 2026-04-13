@@ -164,29 +164,33 @@ Todas protegidas pelo middleware (`src/middleware.ts`). Usuários não autentica
 
 #### `GET /dashboard`
 **Overview principal.**
-- Usa `useReportsByDate(date)` para carregar todos os relatórios do dia selecionado.
+- Usa `DateRangePicker` + `useReportsByDateRange(startDate, endDate)` para carregar relatórios por período.
 - Usa `useTeamReports()` com Realtime subscription para atualizar ao vivo.
 - KPIs agregados:
   - **Comercial:** Faturamento, Vendas, Agendamentos, Calls, Capturados
   - **Produto:** Atendimentos, Resolvidos, TMR Médio, Bloqueios
 - Mini donuts: participação do usuário vs time.
 - Tabela `TeamStatusTable` com status de todos os membros (enviou/pendente + hora).
-- Date picker para navegar em dias históricos.
+- Seletor de período com presets (hoje, ontem, últimos 7 dias, semana, mês e personalizado).
 - Notificação toast quando um membro submete relatório.
-- Topbar com sino de notificação para não-gestores: se faltar relatório diário, mostra aviso com CTA **"Preencher agora"** para `/dashboard/relatorio`; ao enviar o relatório, o aviso some automaticamente.
+- Topbar com sino:
+  - Não-gestores: se faltar relatório diário, mostra aviso com CTA **"Preencher agora"** para `/dashboard/relatorio`; ao enviar o relatório, o aviso some automaticamente.
+  - Gestores: mostra bolinha verde quando todos os colaboradores responderam o relatório diário e exibe a mensagem correspondente.
 
 #### `GET /dashboard/comercial`
 **Painel detalhado do time Comercial.**
-- KPIs do dia (mesmo do overview + Cash Collect).
-- Gráficos de evolução do mês (`ComercialCharts`): faturamento, vendas, agendamentos, capturados — renderizados com Recharts.
+- Usa `DateRangePicker` para visualizar KPIs e gráficos por período (inclui presets e intervalo personalizado).
+- KPIs do período (ou do dia quando intervalo é único), incluindo Cash Collect.
+- Gráficos de evolução do período (`ComercialCharts`) agregados dia a dia no range selecionado.
 - Ranking dos membros por score (`SalesRankingChart`): horizontal bar chart.
 - Filtro de ranking por role: SDR, Seller, Closer.
 - **Score Comercial:** `Vendas * 5 + Faturamento / 1000`
 
 #### `GET /dashboard/produto`
 **Painel detalhado do time Produto.**
-- KPIs do dia: Atendimentos, Resolvidos, TMR Médio, Taxa de Resolução, Bloqueios.
-- Gráficos de evolução do mês (`ProdutoCharts`).
+- Usa `DateRangePicker` para visualizar KPIs e gráficos por período (inclui presets e intervalo personalizado).
+- KPIs do período (ou do dia quando intervalo é único): Atendimentos, Resolvidos, TMR Médio, Taxa de Resolução.
+- Gráficos de evolução do período (`ProdutoCharts`) agregados dia a dia no range selecionado.
 - Ranking com score.
 - TMR com semáforo de cor: verde <2h, amarelo <4h, vermelho >4h.
 - **Score Produto:** `Resolvidos * 10 + max(0, 4 - TMR_h) * 5 - Bloqueios * 2`
@@ -204,12 +208,18 @@ Todas protegidas pelo middleware (`src/middleware.ts`). Usuários não autentica
 - Hooks: `useProfile`, `useDailyReport`.
 
 #### `GET /dashboard/gestao` _(gestor only)_
-**Gestão de metas mensais.**
-- CRUD via `useMonthlyGoals(month)`.
-- Filtro por área: Comercial, Produto, Geral.
-- Seleção de métrica (ex: `faturamento`, `vendas`, `atendimentos`).
-- Edição inline com save/cancel.
-- Metas exibidas agrupadas por área.
+**Planejamento de metas anuais.**
+- Tabela anual com navegação por ano (anterior/próximo) — permite definir metas para qualquer mês, incluindo meses futuros.
+- Abas por área: Comercial | Produto | Geral.
+- Colunas da tabela variam por área:
+  - **Comercial:** Faturamento, Cash Collect, Vendas, Agendamentos, Capturados, Calls Realizadas
+  - **Produto:** Atendimentos, Resolvidos, TMR Meta (h), Taxa de Resolução (%)
+  - **Geral:** Vendas/Mês, Calls Agendadas, Calls Realizadas, Dias Úteis
+- Cada célula é clicável: valor existente → edição inline; célula vazia (—) → abre modal de adição pré-preenchido.
+- Subtotais por trimestre (Q1–Q4) e total anual calculados automaticamente a partir dos valores cadastrados.
+- Mês atual destacado visualmente; meses passados com opacidade reduzida.
+- Modal "Nova meta" permite selecionar mês, área, métrica e valor — não limitado ao mês atual.
+- Fetch direto via Supabase (`.gte('month').lte('month')`) sem passar pelo `useMonthlyGoals`.
 
 #### `GET /dashboard/equipe` _(gestor only)_
 **Gestão da equipe.**
@@ -266,6 +276,7 @@ Atualiza perfil (somente gestor).
 | `useProfile()` | Perfil do usuário autenticado. Retorna `{ profile, loading, isGestor }` |
 | `useDailyReport(userId)` | Relatório de hoje. Retorna `{ report, submitReport(), updateReport() }` |
 | `useReportsByDate(date)` | Todos os relatórios de uma data. Join com profiles. |
+| `useReportsByDateRange(startDate, endDate)` | Relatórios no intervalo selecionado. Join com profiles. |
 | `useMonthReports(month)` | Relatórios do mês agregados por dia para gráficos |
 | `useTeamReports()` | Relatórios de hoje com Realtime subscription |
 | `useMonthlyGoals(month)` | CRUD de metas mensais |

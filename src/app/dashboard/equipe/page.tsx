@@ -173,7 +173,7 @@ export default function EquipePage() {
   if (!isGestor) return null;
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div>
         <p className="text-label-sm uppercase tracking-widest text-outline">◆ Gestão</p>

@@ -37,26 +37,46 @@ export function Topbar({ profile }: TopbarProps) {
   const pathname = usePathname();
   const page = PAGE_LABELS[pathname] ?? { overline: 'Dashboard', title: 'HBS Performance' };
   const today = format(new Date(), "dd 'de' MMMM, yyyy", { locale: ptBR });
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const isGestor = profile.role === 'gestor' || profile.area === 'gestor';
   const [hasPendingReport, setHasPendingReport] = useState(false);
+  const [allTeamReported, setAllTeamReported] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const bellWrapperRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    // Gestores não preenchem relatório diário.
-    if (profile.area === 'gestor') {
-      setHasPendingReport(false);
-      return;
-    }
-
     const supabase = createClient();
-    const dateKey = format(new Date(), 'yyyy-MM-dd');
 
-    async function checkTodayReport() {
+    async function checkNotifications() {
+      if (isGestor) {
+        setHasPendingReport(false);
+
+        const [{ data: teamProfiles, error: profilesError }, { data: reports, error: reportsError }] =
+          await Promise.all([
+            supabase.from('profiles').select('id').neq('area', 'gestor'),
+            supabase.from('daily_reports').select('user_id').eq('report_date', todayKey),
+          ]);
+
+        if (profilesError || reportsError) return;
+
+        const expectedMembers = (teamProfiles ?? []).map((member) => member.id);
+        if (expectedMembers.length === 0) {
+          setAllTeamReported(false);
+          return;
+        }
+
+        const deliveredSet = new Set((reports ?? []).map((report) => report.user_id));
+        const allDelivered = expectedMembers.every((id) => deliveredSet.has(id));
+        setAllTeamReported(allDelivered);
+        return;
+      }
+
+      setAllTeamReported(false);
       const { data, error } = await supabase
         .from('daily_reports')
         .select('id')
         .eq('user_id', profile.id)
-        .eq('report_date', dateKey)
+        .eq('report_date', todayKey)
         .maybeSingle();
 
       if (!error) {
@@ -64,20 +84,19 @@ export function Topbar({ profile }: TopbarProps) {
       }
     }
 
-    checkTodayReport();
+    checkNotifications();
 
     const channel = supabase
-      .channel(`topbar_report_notice_${profile.id}`)
+      .channel(`topbar_report_notice_${profile.id}_${isGestor ? 'gestor' : 'colaborador'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'daily_reports',
-          filter: `user_id=eq.${profile.id}`,
         },
         () => {
-          checkTodayReport();
+          checkNotifications();
         }
       )
       .subscribe();
@@ -85,7 +104,7 @@ export function Topbar({ profile }: TopbarProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile.area, profile.id]);
+  }, [isGestor, profile.id, todayKey]);
 
   useEffect(() => {
     function onOutsideClick(event: MouseEvent) {
@@ -116,8 +135,11 @@ export function Topbar({ profile }: TopbarProps) {
             aria-label="Notificações"
           >
             <Bell size={20} />
-            {hasPendingReport && (
-              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-error" />
+            {(hasPendingReport || allTeamReported) && (
+              <span
+                className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: allTeamReported ? '#476647' : '#ba1a1a' }}
+              />
             )}
           </button>
 
@@ -136,6 +158,10 @@ export function Topbar({ profile }: TopbarProps) {
                     Preencher agora
                   </Link>
                 </div>
+              ) : allTeamReported ? (
+                <p className="text-sm text-on-surface">
+                  Todos os colaboradores responderam o relatório diário.
+                </p>
               ) : (
                 <p className="text-sm text-on-surface-variant">
                   Nenhuma notificação no momento.

@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import {
   DollarSign, ShoppingCart, Calendar, Users, PhoneCall,
-  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { ComercialEvolutionCharts } from '@/components/charts/ComercialCharts';
 import { SalesRankingChart } from '@/components/charts/SalesRankingChart';
@@ -12,13 +11,13 @@ import { type RankingEntry } from '@/components/dashboard/RankingList';
 import { Tabs } from '@/components/ui/Tabs';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Card } from '@/components/ui/Card';
-import { useReportsByDate, type ReportRow } from '@/hooks/useReportsByDate';
+import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
+import { useReportsByDateRange, type ReportRow } from '@/hooks/useReportsByDateRange';
 import { createClient } from '@/lib/supabase/client';
-import { useMonthReports } from '@/hooks/useMonthReports';
 import { useMonthlyGoals } from '@/hooks/useMonthlyGoals';
 import { getMissingPerDay, getCurrentMonth } from '@/lib/utils';
-import { format, addDays, subDays } from 'date-fns';
-import { ptBR } from 'date-fns/locale/pt-BR';
+import { eachDayOfInterval, format, parseISO, startOfMonth } from 'date-fns';
+import type { ComercialDayPoint } from '@/hooks/useMonthReports';
 
 const ROLE_TABS = [
   { key: 'all', label: 'Geral' },
@@ -54,103 +53,97 @@ function aggregateComercial(reports: ReportRow[]) {
 }
 
 function buildRanking(reports: ReportRow[], roleFilter: string): RankingEntry[] {
-  const filtered = reports.filter((r) => {
-    if (r.area !== 'comercial') return false;
-    if (roleFilter !== 'all') return r.role === roleFilter;
-    return true;
-  });
-  return filtered
-    .map((r) => {
-      const d = r.data as Record<string, unknown>;
-      let score = 0;
+  const grouped = new Map<string, RankingEntry & {
+    role: string;
+    agendamentos: number;
+    capturados: number;
+    vendas: number;
+    faturamento: number;
+    cross: number;
+  }>();
+
+  for (const r of reports) {
+    if (r.area !== 'comercial') continue;
+    if (roleFilter !== 'all' && r.role !== roleFilter) continue;
+
+    let entry = grouped.get(r.user_id);
+    if (!entry) {
+      entry = {
+        profile: r.profile,
+        score: 0,
+        metrics: [],
+        role: r.role,
+        agendamentos: 0,
+        capturados: 0,
+        vendas: 0,
+        faturamento: 0,
+        cross: 0,
+      };
+      grouped.set(r.user_id, entry);
+    }
+
+    const d = r.data as Record<string, unknown>;
+    if (r.role === 'sdr') {
+      const ag = (d.calls_agendadas as Record<string, number>) ?? {};
+      const agTotal = (ag.vtl ?? 0) + (ag.flw ?? 0) + (ag.outros ?? 0);
+      const cap = (d.contatos_capturados as Record<string, number>)?.total ?? 0;
+      entry.score += agTotal * 2 + cap;
+      entry.agendamentos += agTotal;
+      entry.capturados += cap;
+    } else if (r.role === 'seller') {
+      const ag = (d.calls_agendadas as Record<string, number>) ?? {};
+      const agTotal = (ag.vtl ?? 0) + (ag.flw ?? 0);
+      const cap = (d.contatos_capturados as Record<string, number>)?.total ?? 0;
+      const cross = Number(d.cross ?? 0);
+      entry.score += agTotal * 2 + cap + cross * 3;
+      entry.agendamentos += agTotal;
+      entry.capturados += cap;
+      entry.cross += cross;
+    } else if (r.role === 'closer') {
+      const v = (d.vendas as Record<string, number>) ?? {};
+      const vendas = (v.amht ?? 0) + (v.vtl ?? 0) + (v.flw ?? 0);
+      const fat = Number(d.faturamento_dia ?? 0);
+      entry.score += vendas * 5 + fat / 1000;
+      entry.vendas += vendas;
+      entry.faturamento += fat;
+    }
+  }
+
+  return [...grouped.values()]
+    .map((entry) => {
       const metrics: { label: string; value: string }[] = [];
-      if (r.role === 'sdr') {
-        const ag = (d.calls_agendadas as Record<string, number>) ?? {};
-        const agTotal = (ag.vtl ?? 0) + (ag.flw ?? 0) + (ag.outros ?? 0);
-        const cap = (d.contatos_capturados as Record<string, number>)?.total ?? 0;
-        score = agTotal * 2 + cap;
-        metrics.push({ label: 'Capturados', value: String(cap) });
-        metrics.push({ label: 'Agendados', value: String(agTotal) });
-      } else if (r.role === 'seller') {
-        const ag = (d.calls_agendadas as Record<string, number>) ?? {};
-        const agTotal = (ag.vtl ?? 0) + (ag.flw ?? 0);
-        const cap = (d.contatos_capturados as Record<string, number>)?.total ?? 0;
-        score = agTotal * 2 + cap + Number(d.cross ?? 0) * 3;
-        metrics.push({ label: 'Capturados', value: String(cap) });
-        metrics.push({ label: 'Agendados', value: String(agTotal) });
-      } else if (r.role === 'closer') {
-        const v = (d.vendas as Record<string, number>) ?? {};
-        const vendas = (v.amht ?? 0) + (v.vtl ?? 0) + (v.flw ?? 0);
-        const fat = Number(d.faturamento_dia ?? 0);
-        score = vendas * 5 + fat / 1000;
-        metrics.push({ label: 'Vendas', value: String(vendas) });
-        metrics.push({ label: 'Fat.', value: `R$ ${(fat / 1000).toFixed(0)}k` });
+      if (entry.role === 'sdr') {
+        metrics.push({ label: 'Capturados', value: String(entry.capturados) });
+        metrics.push({ label: 'Agendados', value: String(entry.agendamentos) });
+      } else if (entry.role === 'seller') {
+        metrics.push({ label: 'Capturados', value: String(entry.capturados) });
+        metrics.push({ label: 'Agendados', value: String(entry.agendamentos) });
+        metrics.push({ label: 'Cross', value: String(entry.cross) });
+      } else if (entry.role === 'closer') {
+        metrics.push({ label: 'Vendas', value: String(entry.vendas) });
+        metrics.push({ label: 'Fat.', value: `R$ ${(entry.faturamento / 1000).toFixed(0)}k` });
       }
-      return { profile: r.profile, score, metrics };
+
+      return { profile: entry.profile, score: Math.round(entry.score * 100) / 100, metrics };
     })
     .sort((a, b) => b.score - a.score);
 }
 
-// ── Date nav helper ───────────────────────────────────────────
-function DateNav({
-  date, onChange,
-}: { date: string; onChange: (d: string) => void }) {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const parsed = new Date(date + 'T12:00:00');
-  const label = format(parsed, "EEE, dd 'de' MMM", { locale: ptBR });
-  const isToday = date === today;
-
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => onChange(format(subDays(parsed, 1), 'yyyy-MM-dd'))}
-        className="p-1.5 rounded-lg hover:bg-surface-container transition"
-        style={{ color: '#7e7665' }}
-      >
-        <ChevronLeft size={16} />
-      </button>
-      <div className="relative">
-        <input
-          type="date"
-          value={date}
-          max={today}
-          onChange={(e) => e.target.value && onChange(e.target.value)}
-          className="opacity-0 absolute inset-0 w-full cursor-pointer"
-        />
-        <span
-          className="text-sm font-medium px-3 py-1.5 rounded-lg border flex items-center gap-1.5 cursor-pointer"
-          style={{
-            borderColor: '#d0c5b2',
-            color: isToday ? '#755b00' : '#1d1c17',
-            backgroundColor: isToday ? '#c9a84c15' : 'white',
-          }}
-        >
-          <Calendar size={14} />
-          {isToday ? 'Hoje' : label}
-        </span>
-      </div>
-      <button
-        onClick={() => { if (!isToday) onChange(format(addDays(parsed, 1), 'yyyy-MM-dd')); }}
-        disabled={isToday}
-        className="p-1.5 rounded-lg hover:bg-surface-container transition disabled:opacity-30"
-        style={{ color: '#7e7665' }}
-      >
-        <ChevronRight size={16} />
-      </button>
-    </div>
-  );
-}
-
 // ── Main Page ─────────────────────────────────────────────────
 export default function ComercialPage() {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
   const [roleTab, setRoleTab] = useState('all');
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [range, setRange] = useState<DateRange>({ startDate: monthStart, endDate: today });
   const month = getCurrentMonth();
 
-  const { reports, profiles, loading, error, silentRefresh } = useReportsByDate(selectedDate);
+  const { reports, loading, error, silentRefresh } = useReportsByDateRange(
+    range.startDate,
+    range.endDate
+  );
   const { goals } = useMonthlyGoals(month);
-  const { comercialPoints, loading: chartLoading } = useMonthReports(month);
-  const isToday = selectedDate === format(new Date(), 'yyyy-MM-dd');
+  const isToday = range.startDate === today && range.endDate === today;
+  const isSingleDay = range.startDate === range.endDate;
 
   // Realtime: atualiza KPIs sem piscar quando alguém envia/edita relatório
   useEffect(() => {
@@ -173,16 +166,28 @@ export default function ComercialPage() {
 
   const ranking = buildRanking(comercialReports, roleTab);
 
-  // Chart data — filter out future days with zero data
-  const chartData = comercialPoints.filter((p) =>
-    p.faturamento > 0 || p.vendas > 0 || p.agendamentos > 0 || p.capturados > 0 || p.callsRealizadas > 0
-  );
+  const chartData: ComercialDayPoint[] = eachDayOfInterval({
+    start: parseISO(range.startDate),
+    end: parseISO(range.endDate),
+  }).map((day) => {
+    const dayKey = format(day, 'yyyy-MM-dd');
+    const dayLabel = format(day, 'dd/MM');
+    const dayReports = comercialReports.filter((r) => r.report_date === dayKey);
+    const dayKpi = aggregateComercial(dayReports);
+    return { date: dayLabel, ...dayKpi };
+  });
 
   return (
     <div className="space-y-8">
-      {/* Date nav */}
+      {/* Date range */}
       <div className="flex justify-end">
-        <DateNav date={selectedDate} onChange={setSelectedDate} />
+        <DateRangePicker
+          startDate={range.startDate}
+          endDate={range.endDate}
+          onChange={setRange}
+          accentColor="#755b00"
+          accentBg="#c9a84c15"
+        />
       </div>
 
       {error && (
@@ -193,7 +198,9 @@ export default function ComercialPage() {
 
       {/* KPIs */}
       <section>
-        <p className="text-label-sm uppercase tracking-widest text-outline mb-3">◆ KPIs do Dia</p>
+        <p className="text-label-sm uppercase tracking-widest text-outline mb-3">
+          ◆ KPIs {isSingleDay ? 'do Dia' : 'do Período'}
+        </p>
         {loading ? (
           <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
             {[...Array(6)].map((_, i) => <Skeleton key={i} variant="card" />)}
@@ -204,8 +211,10 @@ export default function ComercialPage() {
               title="Faturamento"
               value={kpi.faturamento}
               format="currency"
-              target={getGoal('faturamento')}
-              missingPerDay={getGoal('faturamento') ? getMissingPerDay(kpi.faturamento, getGoal('faturamento')!) : undefined}
+              target={isSingleDay ? getGoal('faturamento') : undefined}
+              missingPerDay={isSingleDay && getGoal('faturamento')
+                ? getMissingPerDay(kpi.faturamento, getGoal('faturamento')!)
+                : undefined}
               area="comercial"
               icon={DollarSign}
             />
@@ -219,16 +228,20 @@ export default function ComercialPage() {
             <KpiCard
               title="Vendas"
               value={kpi.vendas}
-              target={getGoal('vendas')}
-              missingPerDay={getGoal('vendas') ? getMissingPerDay(kpi.vendas, getGoal('vendas')!) : undefined}
+              target={isSingleDay ? getGoal('vendas') : undefined}
+              missingPerDay={isSingleDay && getGoal('vendas')
+                ? getMissingPerDay(kpi.vendas, getGoal('vendas')!)
+                : undefined}
               area="comercial"
               icon={ShoppingCart}
             />
             <KpiCard
               title="Agendamentos"
               value={kpi.agendamentos}
-              target={getGoal('agendamentos')}
-              missingPerDay={getGoal('agendamentos') ? getMissingPerDay(kpi.agendamentos, getGoal('agendamentos')!) : undefined}
+              target={isSingleDay ? getGoal('agendamentos') : undefined}
+              missingPerDay={isSingleDay && getGoal('agendamentos')
+                ? getMissingPerDay(kpi.agendamentos, getGoal('agendamentos')!)
+                : undefined}
               area="comercial"
               icon={Calendar}
             />
@@ -241,8 +254,10 @@ export default function ComercialPage() {
             <KpiCard
               title="Capturados"
               value={kpi.capturados}
-              target={getGoal('capturados')}
-              missingPerDay={getGoal('capturados') ? getMissingPerDay(kpi.capturados, getGoal('capturados')!) : undefined}
+              target={isSingleDay ? getGoal('capturados') : undefined}
+              missingPerDay={isSingleDay && getGoal('capturados')
+                ? getMissingPerDay(kpi.capturados, getGoal('capturados')!)
+                : undefined}
               area="comercial"
               icon={Users}
             />
@@ -250,10 +265,10 @@ export default function ComercialPage() {
         )}
       </section>
 
-      {/* Monthly Charts */}
+      {/* Period Charts */}
       <section className="space-y-4">
-        <p className="text-label-sm uppercase tracking-widest text-outline">◆ Evolução do Mês</p>
-        {chartLoading ? (
+        <p className="text-label-sm uppercase tracking-widest text-outline">◆ Evolução do Período</p>
+        {loading ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {[...Array(3)].map((_, i) => <Skeleton key={i} variant="card" className="h-52" />)}
           </div>

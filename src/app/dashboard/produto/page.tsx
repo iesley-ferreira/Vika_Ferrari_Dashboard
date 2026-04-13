@@ -1,110 +1,93 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-  ChevronLeft, ChevronRight, Calendar,
-} from 'lucide-react';
 import { ProdutoEvolutionCharts } from '@/components/charts/ProdutoCharts';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { RankingList, type RankingEntry } from '@/components/dashboard/RankingList';
-import { Tabs } from '@/components/ui/Tabs';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Card } from '@/components/ui/Card';
-import { useReportsByDate, type ReportRow } from '@/hooks/useReportsByDate';
+import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
+import { useReportsByDateRange, type ReportRow } from '@/hooks/useReportsByDateRange';
 import { createClient } from '@/lib/supabase/client';
-import { useMonthReports } from '@/hooks/useMonthReports';
 import { calcProdutoScore, calcResolutionRate } from '@/lib/calculations';
-import { getCurrentMonth } from '@/lib/utils';
-import { format, addDays, subDays } from 'date-fns';
-import { ptBR } from 'date-fns/locale/pt-BR';
-
-const PERIOD_TABS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'week', label: 'Semana' },
-  { key: 'month', label: 'Mês' },
-];
+import { eachDayOfInterval, format, parseISO, startOfMonth } from 'date-fns';
+import type { ProdutoDayPoint } from '@/hooks/useMonthReports';
 
 function buildRanking(reports: ReportRow[]): RankingEntry[] {
-  return reports
-    .filter((r) => r.area === 'produto')
-    .map((r) => {
-      const d = r.data as Record<string, unknown>;
-      const resolvidos = Number(d.resolvidos_total ?? 0);
-      const tmrH = Number(d.tempo_medio_resposta_horas ?? 0);
-      const tmrM = Number(d.tempo_medio_resposta_minutos ?? 0);
-      const bloqueios = Number(d.nao_sei_o_que_fazer ?? 0) + Number(d.falta_clareza_qtd ?? 0);
-      const taxa = calcResolutionRate(Number(d.atendimentos_total ?? 0), resolvidos);
-      const score = calcProdutoScore(resolvidos, tmrH, tmrM, bloqueios);
-      return {
+  const grouped = new Map<string, RankingEntry & {
+    atendimentos: number;
+    resolvidos: number;
+    bloqueios: number;
+    tmrHoursSum: number;
+    tmrCount: number;
+  }>();
+
+  for (const r of reports) {
+    if (r.area !== 'produto') continue;
+
+    let entry = grouped.get(r.user_id);
+    if (!entry) {
+      entry = {
         profile: r.profile,
-        score,
+        score: 0,
+        metrics: [],
+        atendimentos: 0,
+        resolvidos: 0,
+        bloqueios: 0,
+        tmrHoursSum: 0,
+        tmrCount: 0,
+      };
+      grouped.set(r.user_id, entry);
+    }
+
+    const d = r.data as Record<string, unknown>;
+    const atendimentos = Number(d.atendimentos_total ?? 0);
+    const resolvidos = Number(d.resolvidos_total ?? 0);
+    const tmrH = Number(d.tempo_medio_resposta_horas ?? 0);
+    const tmrM = Number(d.tempo_medio_resposta_minutos ?? 0);
+    const bloqueios = Number(d.nao_sei_o_que_fazer ?? 0) + Number(d.falta_clareza_qtd ?? 0);
+    const score = calcProdutoScore(resolvidos, tmrH, tmrM, bloqueios);
+
+    entry.score += score;
+    entry.atendimentos += atendimentos;
+    entry.resolvidos += resolvidos;
+    entry.bloqueios += bloqueios;
+    if (tmrH > 0 || tmrM > 0) {
+      entry.tmrHoursSum += tmrH + tmrM / 60;
+      entry.tmrCount += 1;
+    }
+  }
+
+  return [...grouped.values()]
+    .map((entry) => {
+      const taxa = calcResolutionRate(entry.atendimentos, entry.resolvidos);
+      const tmrMedio = entry.tmrCount > 0 ? entry.tmrHoursSum / entry.tmrCount : 0;
+      const tmrLabel = `${Math.floor(tmrMedio)}h ${Math.round((tmrMedio % 1) * 60)}min`;
+      return {
+        profile: entry.profile,
+        score: Math.round(entry.score * 100) / 100,
         metrics: [
-          { label: 'Resolvidos', value: String(resolvidos) },
+          { label: 'Resolvidos', value: String(entry.resolvidos) },
           { label: 'Taxa', value: `${taxa}%` },
-          { label: 'TMR', value: `${tmrH}h${tmrM > 0 ? ` ${tmrM}min` : ''}` },
+          { label: 'TMR', value: tmrMedio > 0 ? tmrLabel : '0h 0min' },
         ],
       };
     })
     .sort((a, b) => b.score - a.score);
 }
 
-// ── DateNav ───────────────────────────────────────────────────
-function DateNav({ date, onChange }: { date: string; onChange: (d: string) => void }) {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const parsed = new Date(date + 'T12:00:00');
-  const label = format(parsed, "EEE, dd 'de' MMM", { locale: ptBR });
-  const isToday = date === today;
-
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => onChange(format(subDays(parsed, 1), 'yyyy-MM-dd'))}
-        className="p-1.5 rounded-lg hover:bg-surface-container transition"
-        style={{ color: '#7e7665' }}
-      >
-        <ChevronLeft size={16} />
-      </button>
-      <div className="relative">
-        <input
-          type="date"
-          value={date}
-          max={today}
-          onChange={(e) => e.target.value && onChange(e.target.value)}
-          className="opacity-0 absolute inset-0 w-full cursor-pointer"
-        />
-        <span
-          className="text-sm font-medium px-3 py-1.5 rounded-lg border flex items-center gap-1.5 cursor-pointer"
-          style={{
-            borderColor: '#d0c5b2',
-            color: isToday ? '#406181' : '#1d1c17',
-            backgroundColor: isToday ? '#40618115' : 'white',
-          }}
-        >
-          <Calendar size={14} />
-          {isToday ? 'Hoje' : label}
-        </span>
-      </div>
-      <button
-        onClick={() => { if (!isToday) onChange(format(addDays(parsed, 1), 'yyyy-MM-dd')); }}
-        disabled={isToday}
-        className="p-1.5 rounded-lg hover:bg-surface-container transition disabled:opacity-30"
-        style={{ color: '#7e7665' }}
-      >
-        <ChevronRight size={16} />
-      </button>
-    </div>
-  );
-}
-
 // ── Main ──────────────────────────────────────────────────────
 export default function ProdutoPage() {
-  const [period, setPeriod] = useState('today');
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const month = getCurrentMonth();
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
+  const [range, setRange] = useState<DateRange>({ startDate: monthStart, endDate: today });
 
-  const { reports, profiles, loading, error, silentRefresh } = useReportsByDate(selectedDate);
-  const { produtoPoints, loading: chartLoading } = useMonthReports(month);
-  const isToday = selectedDate === format(new Date(), 'yyyy-MM-dd');
+  const { reports, loading, error, silentRefresh } = useReportsByDateRange(
+    range.startDate,
+    range.endDate
+  );
+  const isToday = range.startDate === today && range.endDate === today;
+  const isSingleDay = range.startDate === range.endDate;
 
   // Realtime: atualiza KPIs sem piscar quando alguém envia/edita relatório
   useEffect(() => {
@@ -136,16 +119,55 @@ export default function ProdutoPage() {
   const taxaResolucao = calcResolutionRate(atendimentos, resolvidos);
   const ranking = buildRanking(produtoReports);
 
-  // Filter chart data to days with actual data
-  const chartData = produtoPoints.filter((p) =>
-    p.atendimentos > 0 || p.resolvidos > 0
-  );
+  const chartData: ProdutoDayPoint[] = eachDayOfInterval({
+    start: parseISO(range.startDate),
+    end: parseISO(range.endDate),
+  }).map((day) => {
+    const dayKey = format(day, 'yyyy-MM-dd');
+    const dayReports = produtoReports.filter((r) => r.report_date === dayKey);
+    let dayAtendimentos = 0;
+    let dayResolvidos = 0;
+    let dayTmrSum = 0;
+    let dayTmrCount = 0;
+    let dayBloqueios = 0;
+
+    for (const report of dayReports) {
+      const data = report.data as Record<string, unknown>;
+      dayAtendimentos += Number(data.atendimentos_total ?? 0);
+      dayResolvidos += Number(data.resolvidos_total ?? 0);
+      const h = Number(data.tempo_medio_resposta_horas ?? 0);
+      const m = Number(data.tempo_medio_resposta_minutos ?? 0);
+      if (h > 0 || m > 0) {
+        dayTmrSum += h + m / 60;
+        dayTmrCount++;
+      }
+      dayBloqueios += Number(data.nao_sei_o_que_fazer ?? 0) + Number(data.falta_clareza_qtd ?? 0);
+    }
+
+    const dayTmr = dayTmrCount > 0 ? Math.round((dayTmrSum / dayTmrCount) * 10) / 10 : 0;
+    const dayTaxaResolucao = dayAtendimentos > 0 ? Math.round((dayResolvidos / dayAtendimentos) * 100) : 0;
+
+    return {
+      date: format(day, 'dd/MM'),
+      atendimentos: dayAtendimentos,
+      resolvidos: dayResolvidos,
+      tmr: dayTmr,
+      bloqueios: dayBloqueios,
+      taxaResolucao: dayTaxaResolucao,
+    };
+  });
 
   return (
     <div className="space-y-8">
-      {/* Date nav */}
+      {/* Date range */}
       <div className="flex justify-end">
-        <DateNav date={selectedDate} onChange={setSelectedDate} />
+        <DateRangePicker
+          startDate={range.startDate}
+          endDate={range.endDate}
+          onChange={setRange}
+          accentColor="#406181"
+          accentBg="#40618115"
+        />
       </div>
 
       {error && (
@@ -156,7 +178,9 @@ export default function ProdutoPage() {
 
       {/* KPIs */}
       <section>
-        <p className="text-label-sm uppercase tracking-widest text-outline mb-3">◆ KPIs do Dia</p>
+        <p className="text-label-sm uppercase tracking-widest text-outline mb-3">
+          ◆ KPIs {isSingleDay ? 'do Dia' : 'do Período'}
+        </p>
         {loading ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => <Skeleton key={i} variant="card" />)}
@@ -182,10 +206,10 @@ export default function ProdutoPage() {
         )}
       </section>
 
-      {/* Monthly Charts */}
+      {/* Period Charts */}
       <section className="space-y-4">
-        <p className="text-label-sm uppercase tracking-widest text-outline">◆ Evolução do Mês</p>
-        {chartLoading ? (
+        <p className="text-label-sm uppercase tracking-widest text-outline">◆ Evolução do Período</p>
+        {loading ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {[...Array(3)].map((_, i) => <Skeleton key={i} variant="card" className="h-52" />)}
           </div>
@@ -198,7 +222,6 @@ export default function ProdutoPage() {
       <section>
         <div className="flex items-center justify-between mb-3">
           <p className="text-label-sm uppercase tracking-widest text-outline">◆ Ranking Equipe Produto</p>
-          <Tabs tabs={PERIOD_TABS} active={period} onChange={setPeriod} />
         </div>
         <Card variant="elevated">
           {loading
