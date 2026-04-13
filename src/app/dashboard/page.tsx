@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import {
   DollarSign, ShoppingCart, Calendar, Users, PhoneCall,
-  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { TeamStatusTable } from '@/components/dashboard/TeamStatusTable';
@@ -11,14 +10,14 @@ import { Tabs } from '@/components/ui/Tabs';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Modal } from '@/components/ui/Modal';
 import { ReportViewer } from '@/components/dashboard/ReportViewer';
-import { useReportsByDate, type ReportRow } from '@/hooks/useReportsByDate';
+import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
+import { useReportsByDateRange, type ReportRow } from '@/hooks/useReportsByDateRange';
 import { useMonthlyGoals } from '@/hooks/useMonthlyGoals';
 import { useProfile } from '@/hooks/useProfile';
 import { createClient } from '@/lib/supabase/client';
 import { getMissingPerDay, getCurrentMonth } from '@/lib/utils';
 import type { DonutSlice } from '@/components/charts/MiniDonutChart';
-import { format, addDays, subDays } from 'date-fns';
-import { ptBR } from 'date-fns/locale/pt-BR';
+import { format } from 'date-fns';
 
 const FILTER_TABS = [
   { key: 'all', label: 'Todos' },
@@ -69,10 +68,10 @@ function aggregateProduto(reports: ReportRow[]) {
   return { atendimentos, resolvidos, tmrMedio, tmrSemaphore, bloqueios };
 }
 
-// ── Participação do usuário no donut (2 fatias: você vs equipe) ─
-const DONUT_USER_COLOR = '#dc6788';   // rosa — sempre o usuário
-const DONUT_COMERCIAL_COLOR = '#eacc48'; // amarelo — equipe comercial
-const DONUT_PRODUTO_COLOR = '#6794dc';   // azul — equipe produto
+// ── Participação do usuário no donut — apenas para dia único ──
+const DONUT_USER_COLOR = '#dc6788';
+const DONUT_COMERCIAL_COLOR = '#eacc48';
+const DONUT_PRODUTO_COLOR = '#6794dc';
 
 function makeTwoSlice(
   userName: string,
@@ -108,8 +107,7 @@ function getUserComercialValues(reports: ReportRow[], userId: string) {
     const ag = (d.calls_agendadas as Record<string, number>) ?? {};
     const cap = (d.contatos_capturados as Record<string, number>) ?? {};
     return {
-      faturamento: 0,
-      vendas: 0,
+      faturamento: 0, vendas: 0,
       agendamentos: (ag.vtl ?? 0) + (ag.flw ?? 0) + (ag.outros ?? 0) + (ag.amht ?? 0),
       callsRealizadas: 0,
       capturados: (cap.total ?? 0) as number,
@@ -129,81 +127,31 @@ function getUserProdutoValues(reports: ReportRow[], userId: string) {
   };
 }
 
-// ── DateNav ───────────────────────────────────────────────────
-function DateNav({ date, onChange }: { date: string; onChange: (d: string) => void }) {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const parsed = new Date(date + 'T12:00:00');
-  const label = format(parsed, "EEE, dd 'de' MMM", { locale: ptBR });
-  const isToday = date === today;
-
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => onChange(format(subDays(parsed, 1), 'yyyy-MM-dd'))}
-        className="p-1.5 rounded-lg hover:bg-surface-container transition"
-        style={{ color: '#7e7665' }}
-      >
-        <ChevronLeft size={16} />
-      </button>
-      <div className="relative">
-        <input
-          type="date"
-          value={date}
-          max={today}
-          onChange={(e) => e.target.value && onChange(e.target.value)}
-          className="opacity-0 absolute inset-0 w-full cursor-pointer"
-        />
-        <span
-          className="text-sm font-medium px-3 py-1.5 rounded-lg border flex items-center gap-1.5 cursor-pointer"
-          style={{
-            borderColor: '#d0c5b2',
-            color: isToday ? '#755b00' : '#1d1c17',
-            backgroundColor: isToday ? '#c9a84c15' : 'white',
-          }}
-        >
-          <Calendar size={14} />
-          {isToday ? 'Hoje' : label}
-        </span>
-      </div>
-      <button
-        onClick={() => { if (!isToday) onChange(format(addDays(parsed, 1), 'yyyy-MM-dd')); }}
-        disabled={isToday}
-        className="p-1.5 rounded-lg hover:bg-surface-container transition disabled:opacity-30"
-        style={{ color: '#7e7665' }}
-      >
-        <ChevronRight size={16} />
-      </button>
-    </div>
-  );
-}
-
 // ── Main ──────────────────────────────────────────────────────
 export default function DashboardPage() {
+  const today = format(new Date(), 'yyyy-MM-dd');
   const [filterTab, setFilterTab] = useState('all');
   const [viewReport, setViewReport] = useState<ReportRow | null>(null);
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [range, setRange] = useState<DateRange>({ startDate: today, endDate: today });
   const { profile, isGestor } = useProfile();
 
-  const { reports, profiles, loading, error, refresh, silentRefresh } = useReportsByDate(selectedDate);
+  const { reports, profiles, loading, error, silentRefresh } = useReportsByDateRange(
+    range.startDate,
+    range.endDate
+  );
   const { goals } = useMonthlyGoals(getCurrentMonth());
-  const isToday = selectedDate === format(new Date(), 'yyyy-MM-dd');
 
-  // Realtime: atualiza Status da Equipe sem piscar quando alguém envia relatório
+  const isSingleDay = range.startDate === range.endDate;
+  const isToday = range.endDate === today && range.startDate === today;
+
+  // Realtime: only when viewing today
   useEffect(() => {
     if (!isToday) return;
     const supabase = createClient();
     const channel = supabase
       .channel('dashboard_realtime')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'daily_reports' },
-        () => { silentRefresh(); }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'daily_reports' },
-        () => { silentRefresh(); }
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'daily_reports' }, () => silentRefresh())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'daily_reports' }, () => silentRefresh())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [isToday, silentRefresh]);
@@ -214,9 +162,16 @@ export default function DashboardPage() {
   const userArea = profile?.area;
   const userName = profile?.full_name?.split(' ')[0] ?? 'Você';
 
-  const noDonut = { faturamento: undefined as DonutSlice[] | undefined, vendas: undefined as DonutSlice[] | undefined, agendamentos: undefined as DonutSlice[] | undefined, calls: undefined as DonutSlice[] | undefined, capturados: undefined as DonutSlice[] | undefined };
+  // Donuts only make sense for a single day
+  const noDonut = {
+    faturamento: undefined as DonutSlice[] | undefined,
+    vendas: undefined as DonutSlice[] | undefined,
+    agendamentos: undefined as DonutSlice[] | undefined,
+    calls: undefined as DonutSlice[] | undefined,
+    capturados: undefined as DonutSlice[] | undefined,
+  };
   const comercialDonuts = (() => {
-    if (userArea !== 'comercial' || !profile) return noDonut;
+    if (!isSingleDay || userArea !== 'comercial' || !profile) return noDonut;
     const uv = getUserComercialValues(reports, profile.id);
     if (!uv) return noDonut;
     return {
@@ -228,9 +183,13 @@ export default function DashboardPage() {
     };
   })();
 
-  const noProdutoDonut = { atendimentos: undefined as DonutSlice[] | undefined, resolvidos: undefined as DonutSlice[] | undefined, bloqueios: undefined as DonutSlice[] | undefined };
+  const noProdutoDonut = {
+    atendimentos: undefined as DonutSlice[] | undefined,
+    resolvidos: undefined as DonutSlice[] | undefined,
+    bloqueios: undefined as DonutSlice[] | undefined,
+  };
   const produtoDonuts = (() => {
-    if (userArea !== 'produto' || !profile) return noProdutoDonut;
+    if (!isSingleDay || userArea !== 'produto' || !profile) return noProdutoDonut;
     const uv = getUserProdutoValues(reports, profile.id);
     if (!uv) return noProdutoDonut;
     return {
@@ -246,9 +205,15 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      {/* Date nav */}
+      {/* Date range picker */}
       <div className="flex justify-end">
-        <DateNav date={selectedDate} onChange={setSelectedDate} />
+        <DateRangePicker
+          startDate={range.startDate}
+          endDate={range.endDate}
+          onChange={setRange}
+          accentColor="#755b00"
+          accentBg="#c9a84c15"
+        />
       </div>
 
       {error && (
@@ -272,8 +237,8 @@ export default function DashboardPage() {
               title="Faturamento"
               value={comercial.faturamento}
               format="currency"
-              target={getGoal('comercial', 'faturamento')}
-              missingPerDay={getGoal('comercial', 'faturamento')
+              target={isSingleDay ? getGoal('comercial', 'faturamento') : undefined}
+              missingPerDay={isSingleDay && getGoal('comercial', 'faturamento')
                 ? getMissingPerDay(comercial.faturamento, getGoal('comercial', 'faturamento')!)
                 : undefined}
               area="comercial"
@@ -283,8 +248,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Vendas"
               value={comercial.vendas}
-              target={getGoal('comercial', 'vendas')}
-              missingPerDay={getGoal('comercial', 'vendas')
+              target={isSingleDay ? getGoal('comercial', 'vendas') : undefined}
+              missingPerDay={isSingleDay && getGoal('comercial', 'vendas')
                 ? getMissingPerDay(comercial.vendas, getGoal('comercial', 'vendas')!)
                 : undefined}
               area="comercial"
@@ -294,8 +259,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Agendamentos"
               value={comercial.agendamentos}
-              target={getGoal('comercial', 'agendamentos')}
-              missingPerDay={getGoal('comercial', 'agendamentos')
+              target={isSingleDay ? getGoal('comercial', 'agendamentos') : undefined}
+              missingPerDay={isSingleDay && getGoal('comercial', 'agendamentos')
                 ? getMissingPerDay(comercial.agendamentos, getGoal('comercial', 'agendamentos')!)
                 : undefined}
               area="comercial"
@@ -312,8 +277,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Capturados"
               value={comercial.capturados}
-              target={getGoal('comercial', 'capturados')}
-              missingPerDay={getGoal('comercial', 'capturados')
+              target={isSingleDay ? getGoal('comercial', 'capturados') : undefined}
+              missingPerDay={isSingleDay && getGoal('comercial', 'capturados')
                 ? getMissingPerDay(comercial.capturados, getGoal('comercial', 'capturados')!)
                 : undefined}
               area="comercial"
@@ -335,8 +300,8 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard title="Atendimentos hoje" value={produto.atendimentos} area="produto" donutData={produtoDonuts.atendimentos} />
-            <KpiCard title="Resolvidos hoje" value={produto.resolvidos} area="produto" donutData={produtoDonuts.resolvidos} />
+            <KpiCard title="Atendimentos" value={produto.atendimentos} area="produto" donutData={produtoDonuts.atendimentos} />
+            <KpiCard title="Resolvidos" value={produto.resolvidos} area="produto" donutData={produtoDonuts.resolvidos} />
             <KpiCard
               title="TMR Médio"
               value={produto.tmrMedio}

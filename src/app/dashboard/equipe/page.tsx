@@ -1,20 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import {
-  Users, Shield, RefreshCw, Search, ChevronDown, Calendar,
-  CheckCircle2, Clock
-} from 'lucide-react';
-import { useProfile } from '@/hooks/useProfile';
-import { createClient } from '@/lib/supabase/client';
-import { Skeleton } from '@/components/ui/Skeleton';
+import { ReportViewer } from '@/components/dashboard/ReportViewer';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
-import type { Profile, DailyReport } from '@/types/database';
+import { useProfile } from '@/hooks/useProfile';
+import { createClient } from '@/lib/supabase/client';
 import { formatDate } from '@/lib/utils';
+import type { DailyReport, Profile } from '@/types/database';
 import { format } from 'date-fns';
+import {
+  CheckCircle2, Clock,
+  RefreshCw, Search,
+  Shield
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 type MemberWithReport = Profile & {
   lastReport: DailyReport | null;
@@ -27,15 +29,6 @@ const AREA_FILTER_OPTIONS = [
   { value: 'comercial', label: 'Comercial' },
   { value: 'gestor', label: 'Gestores' },
 ];
-
-const ROLE_LABELS: Record<string, string> = {
-  especialista: 'Especialista',
-  gestora_produto: 'Gestora Produto',
-  sdr: 'SDR',
-  seller: 'Seller',
-  closer: 'Closer',
-  gestor: 'Gestor',
-};
 
 const ROLE_OPTIONS: Record<string, { value: string; label: string }[]> = {
   produto: [
@@ -71,8 +64,6 @@ export default function EquipePage() {
   // View report modal
   const [viewReport, setViewReport] = useState<DailyReport | null>(null);
   const [viewMember, setViewMember] = useState<MemberWithReport | null>(null);
-  const [historyReports, setHistoryReports] = useState<DailyReport[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     if (!profileLoading && !isGestor) router.replace('/dashboard');
@@ -113,19 +104,6 @@ export default function EquipePage() {
   }
 
   useEffect(() => { loadMembers(); }, []);
-
-  async function loadHistory(memberId: string) {
-    setHistoryLoading(true);
-    const supabase = createClient();
-    const { data } = await supabase
-      .from('daily_reports')
-      .select('*')
-      .eq('user_id', memberId)
-      .order('report_date', { ascending: false })
-      .limit(30);
-    setHistoryReports(data ?? []);
-    setHistoryLoading(false);
-  }
 
   async function handlePromote() {
     if (!promoteTarget) return;
@@ -214,7 +192,7 @@ export default function EquipePage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar membro..."
-            className="border border-outline-variant rounded-lg pl-9 pr-3 py-2 text-sm bg-white text-on-surface w-52"
+            className="border border-outline-variant rounded-md pl-9 pr-3 py-2 text-sm bg-white text-on-surface w-52"
           />
         </div>
         <div className="flex gap-1">
@@ -243,7 +221,7 @@ export default function EquipePage() {
       </div>
 
       {/* Table */}
-      <div className="bg-surface rounded-xl border border-outline-variant overflow-hidden">
+      <div className="bg-surface rounded-md border border-outline-variant overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="border-b border-outline-variant bg-surface-low">
@@ -320,7 +298,6 @@ export default function EquipePage() {
                         onClick={() => {
                           setViewReport(member.lastReport);
                           setViewMember(member);
-                          loadHistory(member.id);
                         }}
                         className="text-xs hover:underline"
                         style={{ color: '#755b00' }}
@@ -362,7 +339,6 @@ export default function EquipePage() {
                           onClick={() => {
                             setViewReport(member.todayReport);
                             setViewMember(member);
-                            loadHistory(member.id);
                           }}
                           className="px-2.5 py-1.5 rounded-lg text-xs border border-outline-variant hover:bg-surface-container transition text-on-surface-variant"
                         >
@@ -477,50 +453,20 @@ export default function EquipePage() {
       {/* View report modal */}
       <Modal
         open={!!viewReport}
-        onClose={() => { setViewReport(null); setViewMember(null); setHistoryReports([]); }}
+        onClose={() => { setViewReport(null); setViewMember(null); }}
         title={`Relatório — ${viewMember?.full_name ?? ''}`}
       >
-        <div className="space-y-4">
-          {/* History selector */}
-          {historyLoading ? (
-            <Skeleton variant="text" height="32px" className="rounded" />
-          ) : historyReports.length > 0 ? (
-            <div>
-              <label className="block text-xs font-medium text-outline mb-1">Data</label>
-              <select
-                value={viewReport?.id ?? ''}
-                onChange={(e) => {
-                  const r = historyReports.find((h) => h.id === e.target.value);
-                  if (r) setViewReport(r);
-                }}
-                className="border border-outline-variant rounded-lg px-3 py-2 text-sm bg-white text-on-surface w-full"
-              >
-                {historyReports.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {formatDate(r.report_date)} — {ROLE_LABELS[r.role] ?? r.role}
-                    {r.edited_at ? ' (editado)' : ''}
-                  </option>
-                ))}
-              </select>
+        {viewReport && (
+          <div className="space-y-4">
+            <div className="text-xs text-outline flex gap-4">
+              <span>Enviado: {format(new Date(viewReport.submitted_at), 'dd/MM/yyyy HH:mm')}</span>
+              {viewReport.edited_at && (
+                <span>Editado: {format(new Date(viewReport.edited_at), 'dd/MM/yyyy HH:mm')}</span>
+              )}
             </div>
-          ) : null}
-
-          {viewReport && (
-            <>
-              <div className="text-xs text-outline flex gap-4">
-                <span>Enviado: {format(new Date(viewReport.submitted_at), 'dd/MM/yyyy HH:mm')}</span>
-                {viewReport.edited_at && (
-                  <span>Editado: {format(new Date(viewReport.edited_at), 'dd/MM/yyyy HH:mm')}</span>
-                )}
-              </div>
-              <div className="bg-surface-low rounded-lg p-4">
-                <pre className="text-xs text-on-surface-variant whitespace-pre-wrap overflow-auto max-h-96">
-                  {JSON.stringify(viewReport.data, null, 2)}
-                </pre>
-              </div>
-            </>
-          )}
-        </div>
+            <ReportViewer role={viewReport.role} data={viewReport.data as Record<string, unknown>} />
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -1,11 +1,14 @@
 'use client';
 
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale/pt-BR';
 import { Bell } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/utils';
+import { createClient } from '@/lib/supabase/client';
 import type { Profile } from '@/types/database';
 
 const PAGE_LABELS: Record<string, { overline: string; title: string }> = {
@@ -34,6 +37,67 @@ export function Topbar({ profile }: TopbarProps) {
   const pathname = usePathname();
   const page = PAGE_LABELS[pathname] ?? { overline: 'Dashboard', title: 'HBS Performance' };
   const today = format(new Date(), "dd 'de' MMMM, yyyy", { locale: ptBR });
+  const [hasPendingReport, setHasPendingReport] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const bellWrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // Gestores não preenchem relatório diário.
+    if (profile.area === 'gestor') {
+      setHasPendingReport(false);
+      return;
+    }
+
+    const supabase = createClient();
+    const dateKey = format(new Date(), 'yyyy-MM-dd');
+
+    async function checkTodayReport() {
+      const { data, error } = await supabase
+        .from('daily_reports')
+        .select('id')
+        .eq('user_id', profile.id)
+        .eq('report_date', dateKey)
+        .maybeSingle();
+
+      if (!error) {
+        setHasPendingReport(!data);
+      }
+    }
+
+    checkTodayReport();
+
+    const channel = supabase
+      .channel(`topbar_report_notice_${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'daily_reports',
+          filter: `user_id=eq.${profile.id}`,
+        },
+        () => {
+          checkTodayReport();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile.area, profile.id]);
+
+  useEffect(() => {
+    function onOutsideClick(event: MouseEvent) {
+      if (!bellWrapperRef.current) return;
+      if (!bellWrapperRef.current.contains(event.target as Node)) {
+        setNoticeOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
+  }, []);
 
   return (
     <header className="h-16 bg-background flex items-center justify-between px-6 border-b-2 border-outline-variant/40 shrink-0">
@@ -45,9 +109,41 @@ export function Topbar({ profile }: TopbarProps) {
       <div className="flex items-center gap-4">
         <span className="text-sm text-on-surface-variant hidden md:block">{today}</span>
 
-        <button className="relative text-outline hover:text-on-surface transition-colors">
-          <Bell size={20} />
-        </button>
+        <div ref={bellWrapperRef} className="relative">
+          <button
+            className="relative text-outline hover:text-on-surface transition-colors"
+            onClick={() => setNoticeOpen((prev) => !prev)}
+            aria-label="Notificações"
+          >
+            <Bell size={20} />
+            {hasPendingReport && (
+              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-error" />
+            )}
+          </button>
+
+          {noticeOpen && (
+            <div className="absolute right-0 top-9 w-72 rounded-lg border border-outline-variant bg-surface shadow-lg p-3 z-20">
+              {hasPendingReport ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-on-surface">
+                    Você ainda não preencheu seu relatório diário.
+                  </p>
+                  <Link
+                    href="/dashboard/relatorio"
+                    onClick={() => setNoticeOpen(false)}
+                    className="text-sm font-medium text-primary hover:underline"
+                  >
+                    Preencher agora
+                  </Link>
+                </div>
+              ) : (
+                <p className="text-sm text-on-surface-variant">
+                  Nenhuma notificação no momento.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center gap-2">
           <div

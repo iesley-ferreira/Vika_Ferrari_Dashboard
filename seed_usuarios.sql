@@ -190,9 +190,15 @@ BEGIN
   -- 3. GERAR RELATÓRIOS — 30 dias regressivos (pula sáb/dom)
   --    Cada usuária tem perfis de desempenho distintos.
   -- ============================================================
-  FOR i IN 0..29 LOOP
-    d := CURRENT_DATE - i;
-    CONTINUE WHEN EXTRACT(DOW FROM d) IN (0, 6); -- 0=dom 6=sab
+  FOR d IN
+  SELECT gs::date
+  FROM generate_series(
+    date_trunc('month', CURRENT_DATE - interval '1 month')::date, -- 1º dia do mês passado
+    CURRENT_DATE,                                                  -- hoje
+    interval '1 day'
+  ) AS gs
+LOOP
+  CONTINUE WHEN EXTRACT(DOW FROM d) IN (0, 6); -- mantém só dias úteis
 
     -- ──────────────────────────────────────────────────
     -- ANA BEATRIZ — especialista produto (alta performance)

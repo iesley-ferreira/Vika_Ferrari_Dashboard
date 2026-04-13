@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
-import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { X } from 'lucide-react';
+import { useEffect } from 'react';
 
 interface ModalProps {
   open: boolean;
@@ -28,7 +28,7 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
       <div className="absolute inset-0 bg-charcoal/50 backdrop-blur-sm" onClick={onClose} />
       <div
         className={cn(
-          'relative bg-surface rounded-xl shadow-lg w-full max-w-lg max-h-[90vh] flex flex-col',
+          'relative bg-surface rounded-md shadow-lg w-full max-w-lg max-h-[90vh] flex flex-col',
           className
         )}
       >

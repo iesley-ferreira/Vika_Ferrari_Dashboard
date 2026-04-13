@@ -1,8 +1,7 @@
+import { MiniDonutChart, type DonutSlice } from '@/components/charts/MiniDonutChart';
 import { Card } from '@/components/ui/Card';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { MiniDonutChart, type DonutSlice } from '@/components/charts/MiniDonutChart';
-import { cn } from '@/lib/utils';
-import { formatCurrency } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 import type { LucideIcon } from 'lucide-react';
 
 type Format = 'currency' | 'number' | 'time' | 'percent';
@@ -103,11 +102,7 @@ export function KpiCard({
             <span>Meta: {formatValue(target, format)}</span>
             {missing > 0 && <span>Faltam: {formatValue(missing, format)}</span>}
           </div>
-          {missingPerDay !== undefined && missingPerDay > 0 && (
-            <p className="text-xs text-on-surface-variant">
-              ≈ {formatValue(missingPerDay, format)}/dia
-            </p>
-          )}
+          
         </div>
       )}
     </Card>
