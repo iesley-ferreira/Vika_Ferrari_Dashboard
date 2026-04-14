@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { produtoSchema, type ProdutoFormData } from '@/types/forms';
@@ -22,7 +23,7 @@ const SEMAPHORE_COLORS = {
 };
 
 export function ProdutoForm({ onSubmit, submitting }: ProdutoFormProps) {
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<ProdutoFormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<ProdutoFormData>({
     resolver: zodResolver(produtoSchema),
     defaultValues: {
       atendimentos: { flw: 0, vtl_amht_outros: 0, sprint: 0 },
@@ -40,6 +41,24 @@ export function ProdutoForm({ onSubmit, submitting }: ProdutoFormProps) {
   const tmrM = watch('tempo_medio_resposta_minutos') ?? 0;
   const semaphore = getTmrSemaphore(tmrH, tmrM);
 
+  const atFlw = watch('atendimentos.flw') ?? 0;
+  const atVtl = watch('atendimentos.vtl_amht_outros') ?? 0;
+  const atSprint = watch('atendimentos.sprint') ?? 0;
+  const atendimentosTotal = (Number(atFlw) || 0) + (Number(atVtl) || 0) + (Number(atSprint) || 0);
+
+  const resFlw = watch('resolvidos.flw') ?? 0;
+  const resVtl = watch('resolvidos.vtl_amht_outros') ?? 0;
+  const resSprint = watch('resolvidos.sprint') ?? 0;
+  const resolvidosTotal = (Number(resFlw) || 0) + (Number(resVtl) || 0) + (Number(resSprint) || 0);
+
+  useEffect(() => {
+    setValue('atendimentos_total', atendimentosTotal, { shouldValidate: true });
+  }, [atendimentosTotal, setValue]);
+
+  useEffect(() => {
+    setValue('resolvidos_total', resolvidosTotal, { shouldValidate: true });
+  }, [resolvidosTotal, setValue]);
+
   return (
     <form onSubmit={handleSubmit((d) => onSubmit(d as Record<string, unknown>))} className="space-y-6">
       <Card variant="elevated">
@@ -48,7 +67,7 @@ export function ProdutoForm({ onSubmit, submitting }: ProdutoFormProps) {
           <Input label="FLW" type="number" min={0} {...register('atendimentos.flw', { valueAsNumber: true })} />
           <Input label="VTL/AMHT/Outros" type="number" min={0} {...register('atendimentos.vtl_amht_outros', { valueAsNumber: true })} />
           <Input label="Sprint" type="number" min={0} {...register('atendimentos.sprint', { valueAsNumber: true })} />
-          <Input label="Total" type="number" min={0} {...register('atendimentos_total', { valueAsNumber: true })} error={errors.atendimentos_total?.message} />
+          <Input label="Total" type="number" min={0} readOnly value={atendimentosTotal} onChange={() => {}} error={errors.atendimentos_total?.message} />
         </div>
       </Card>
 
@@ -58,7 +77,7 @@ export function ProdutoForm({ onSubmit, submitting }: ProdutoFormProps) {
           <Input label="FLW" type="number" min={0} {...register('resolvidos.flw', { valueAsNumber: true })} />
           <Input label="VTL/AMHT/Outros" type="number" min={0} {...register('resolvidos.vtl_amht_outros', { valueAsNumber: true })} />
           <Input label="Sprint" type="number" min={0} {...register('resolvidos.sprint', { valueAsNumber: true })} />
-          <Input label="Total" type="number" min={0} {...register('resolvidos_total', { valueAsNumber: true })} error={errors.resolvidos_total?.message} />
+          <Input label="Total" type="number" min={0} readOnly value={resolvidosTotal} onChange={() => {}} error={errors.resolvidos_total?.message} />
         </div>
       </Card>
 

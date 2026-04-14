@@ -10,6 +10,8 @@ import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker
 import { useReportsByDateRange, type ReportRow } from '@/hooks/useReportsByDateRange';
 import { createClient } from '@/lib/supabase/client';
 import { calcProdutoScore, calcResolutionRate } from '@/lib/calculations';
+import { useMonthlyGoals } from '@/hooks/useMonthlyGoals';
+import { calcPeriodTarget, countWorkDays, monthsInRange } from '@/lib/utils';
 import { eachDayOfInterval, format, parseISO, startOfMonth } from 'date-fns';
 import type { ProdutoDayPoint } from '@/hooks/useMonthReports';
 
@@ -86,8 +88,24 @@ export default function ProdutoPage() {
     range.startDate,
     range.endDate
   );
+  const rangeMonths = monthsInRange(range.startDate, range.endDate);
+  const { goals } = useMonthlyGoals(rangeMonths);
   const isToday = range.startDate === today && range.endDate === today;
   const isSingleDay = range.startDate === range.endDate;
+
+  const [sy, sm, sd] = range.startDate.split('-').map(Number);
+  const [ey, em, ed] = range.endDate.split('-').map(Number);
+  const periodWorkDays = countWorkDays(new Date(sy, sm - 1, sd), new Date(ey, em - 1, ed));
+
+  function monthlyGoal(m: string, metric: string) {
+    return goals.find((g) => g.month === m && g.area === 'produto' && g.metric === metric)?.target;
+  }
+  function periodTarget(metric: string) {
+    return calcPeriodTarget(range.startDate, range.endDate, (m) => monthlyGoal(m, metric));
+  }
+  const tLabel = periodWorkDays === 1 ? 'Meta diária' : `Meta (${periodWorkDays} dias úteis)`;
+  const tmrGoal = monthlyGoal(rangeMonths[0], 'tmr_horas');
+  const taxaGoal = monthlyGoal(rangeMonths[0], 'taxa_resolucao');
 
   // Realtime: atualiza KPIs sem piscar quando alguém envia/edita relatório
   useEffect(() => {
@@ -187,20 +205,34 @@ export default function ProdutoPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard title="Atendimentos" value={atendimentos} area="produto" />
-            <KpiCard title="Resolvidos" value={resolvidos} area="produto" />
+            <KpiCard
+              title="Atendimentos"
+              value={atendimentos}
+              target={periodTarget('atendimentos')}
+              targetLabel={tLabel}
+              area="produto"
+            />
+            <KpiCard
+              title="Resolvidos"
+              value={resolvidos}
+              target={periodTarget('resolvidos')}
+              targetLabel={tLabel}
+              area="produto"
+            />
             <KpiCard
               title="TMR Médio"
               value={tmrMedio}
               format="time"
               area="produto"
               semaphore={tmrSemaphore}
+              targetHint={tmrGoal != null ? `Meta: até ${tmrGoal}h` : undefined}
             />
             <KpiCard
               title="Taxa Resolução"
               value={taxaResolucao}
               format="percent"
               area="produto"
+              targetHint={taxaGoal != null ? `Meta: ${taxaGoal}%` : undefined}
             />
           </div>
         )}

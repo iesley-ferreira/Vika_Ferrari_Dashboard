@@ -15,7 +15,7 @@ import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker
 import { useReportsByDateRange, type ReportRow } from '@/hooks/useReportsByDateRange';
 import { createClient } from '@/lib/supabase/client';
 import { useMonthlyGoals } from '@/hooks/useMonthlyGoals';
-import { getMissingPerDay, getCurrentMonth } from '@/lib/utils';
+import { calcPeriodTarget, countWorkDays, monthsInRange } from '@/lib/utils';
 import { eachDayOfInterval, format, parseISO, startOfMonth } from 'date-fns';
 import type { ComercialDayPoint } from '@/hooks/useMonthReports';
 
@@ -135,15 +135,27 @@ export default function ComercialPage() {
   const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
   const [roleTab, setRoleTab] = useState('all');
   const [range, setRange] = useState<DateRange>({ startDate: monthStart, endDate: today });
-  const month = getCurrentMonth();
 
   const { reports, loading, error, silentRefresh } = useReportsByDateRange(
     range.startDate,
     range.endDate
   );
-  const { goals } = useMonthlyGoals(month);
+  const rangeMonths = monthsInRange(range.startDate, range.endDate);
+  const { goals } = useMonthlyGoals(rangeMonths);
   const isToday = range.startDate === today && range.endDate === today;
   const isSingleDay = range.startDate === range.endDate;
+
+  const [sy, sm, sd] = range.startDate.split('-').map(Number);
+  const [ey, em, ed] = range.endDate.split('-').map(Number);
+  const periodWorkDays = countWorkDays(new Date(sy, sm - 1, sd), new Date(ey, em - 1, ed));
+
+  function monthlyGoal(month: string, metric: string) {
+    return goals.find((g) => g.month === month && g.area === 'comercial' && g.metric === metric)?.target;
+  }
+  function periodTarget(metric: string) {
+    return calcPeriodTarget(range.startDate, range.endDate, (m) => monthlyGoal(m, metric));
+  }
+  const tLabel = periodWorkDays === 1 ? 'Meta diária' : `Meta (${periodWorkDays} dias úteis)`;
 
   // Realtime: atualiza KPIs sem piscar quando alguém envia/edita relatório
   useEffect(() => {
@@ -159,10 +171,6 @@ export default function ComercialPage() {
 
   const comercialReports = reports.filter((r) => r.area === 'comercial');
   const kpi = aggregateComercial(comercialReports);
-
-  function getGoal(metric: string) {
-    return goals.find((g) => g.area === 'comercial' && g.metric === metric)?.target;
-  }
 
   const ranking = buildRanking(comercialReports, roleTab);
 
@@ -211,10 +219,8 @@ export default function ComercialPage() {
               title="Faturamento"
               value={kpi.faturamento}
               format="currency"
-              target={isSingleDay ? getGoal('faturamento') : undefined}
-              missingPerDay={isSingleDay && getGoal('faturamento')
-                ? getMissingPerDay(kpi.faturamento, getGoal('faturamento')!)
-                : undefined}
+              target={periodTarget('faturamento')}
+              targetLabel={tLabel}
               area="comercial"
               icon={DollarSign}
             />
@@ -222,42 +228,40 @@ export default function ComercialPage() {
               title="Cash Collect"
               value={kpi.cashCollect}
               format="currency"
+              target={periodTarget('cash_collect')}
+              targetLabel={tLabel}
               area="comercial"
               icon={DollarSign}
             />
             <KpiCard
               title="Vendas"
               value={kpi.vendas}
-              target={isSingleDay ? getGoal('vendas') : undefined}
-              missingPerDay={isSingleDay && getGoal('vendas')
-                ? getMissingPerDay(kpi.vendas, getGoal('vendas')!)
-                : undefined}
+              target={periodTarget('vendas')}
+              targetLabel={tLabel}
               area="comercial"
               icon={ShoppingCart}
             />
             <KpiCard
               title="Agendamentos"
               value={kpi.agendamentos}
-              target={isSingleDay ? getGoal('agendamentos') : undefined}
-              missingPerDay={isSingleDay && getGoal('agendamentos')
-                ? getMissingPerDay(kpi.agendamentos, getGoal('agendamentos')!)
-                : undefined}
+              target={periodTarget('agendamentos')}
+              targetLabel={tLabel}
               area="comercial"
               icon={Calendar}
             />
             <KpiCard
               title="Calls Realizadas"
               value={kpi.callsRealizadas}
+              target={periodTarget('calls')}
+              targetLabel={tLabel}
               area="comercial"
               icon={PhoneCall}
             />
             <KpiCard
               title="Capturados"
               value={kpi.capturados}
-              target={isSingleDay ? getGoal('capturados') : undefined}
-              missingPerDay={isSingleDay && getGoal('capturados')
-                ? getMissingPerDay(kpi.capturados, getGoal('capturados')!)
-                : undefined}
+              target={periodTarget('capturados')}
+              targetLabel={tLabel}
               area="comercial"
               icon={Users}
             />

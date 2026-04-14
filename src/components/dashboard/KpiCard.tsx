@@ -35,12 +35,18 @@ interface KpiCardProps {
   value: number;
   format?: Format;
   target?: number;
+  /** Valor acumulado no mês — usado na barra de progresso quando diferente de `value` */
+  monthValue?: number;
+  /** Rótulo da meta (ex: "Meta diária", "Meta mensal"). Padrão: "Meta" */
+  targetLabel?: string;
   area: 'comercial' | 'produto';
   icon?: LucideIcon;
   semaphore?: 'green' | 'amber' | 'red';
   suffix?: string;
   missingPerDay?: number;
   donutData?: DonutSlice[];
+  /** Texto de meta exibido sem barra de progresso (ex: métricas onde menor é melhor) */
+  targetHint?: string;
 }
 
 export function KpiCard({
@@ -48,18 +54,23 @@ export function KpiCard({
   value,
   format = 'number',
   target,
+  monthValue,
+  targetLabel = 'Meta',
   area,
   icon: Icon,
   semaphore,
   suffix,
   missingPerDay,
   donutData,
+  targetHint,
 }: KpiCardProps) {
-  const missing = target ? Math.max(0, target - value) : 0;
+  // Para o progresso, usa o acumulado do mês quando disponível
+  const progressValue = monthValue ?? value;
+  const missing = target ? Math.max(0, Math.round(target - progressValue)) : 0;
   const hasDonut = donutData && donutData.length > 1 && value > 0;
 
   return (
-    <Card variant={area}>
+    <Card variant={area} className="h-full flex flex-col">
       <div className="flex items-start justify-between mb-3">
         <p className="text-label-sm uppercase tracking-widest text-on-surface-variant">{title}</p>
         {Icon && <Icon size={16} className="text-outline mt-0.5" />}
@@ -96,14 +107,22 @@ export function KpiCard({
       </div>
 
       {target !== undefined && (
-        <div className="space-y-1.5">
-          <ProgressBar value={value} max={target} showLabel />
+        <div className="space-y-1.5 mt-auto">
+          <ProgressBar value={progressValue} max={target} showLabel area={area} />
           <div className="flex justify-between text-xs text-outline">
-            <span>Meta: {formatValue(target, format)}</span>
+            <span>{targetLabel}: {formatValue(target, format)}</span>
             {missing > 0 && <span>Faltam: {formatValue(missing, format)}</span>}
           </div>
-          
+          {monthValue !== undefined && monthValue !== value && (
+            <p className="text-xs text-outline opacity-70">
+              Acumulado no mês: {formatValue(monthValue, format)}
+            </p>
+          )}
         </div>
+      )}
+
+      {target === undefined && targetHint && (
+        <p className="text-xs text-outline mt-auto">{targetHint}</p>
       )}
     </Card>
   );

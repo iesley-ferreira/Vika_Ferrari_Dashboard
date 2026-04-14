@@ -15,7 +15,7 @@ import { useReportsByDateRange, type ReportRow } from '@/hooks/useReportsByDateR
 import { useMonthlyGoals } from '@/hooks/useMonthlyGoals';
 import { useProfile } from '@/hooks/useProfile';
 import { createClient } from '@/lib/supabase/client';
-import { getMissingPerDay, getCurrentMonth } from '@/lib/utils';
+import { calcPeriodTarget, countWorkDays, monthsInRange } from '@/lib/utils';
 import type { DonutSlice } from '@/components/charts/MiniDonutChart';
 import { format } from 'date-fns';
 
@@ -139,10 +139,16 @@ export default function DashboardPage() {
     range.startDate,
     range.endDate
   );
-  const { goals } = useMonthlyGoals(getCurrentMonth());
+  const rangeMonths = monthsInRange(range.startDate, range.endDate);
+  const { goals } = useMonthlyGoals(rangeMonths);
 
   const isSingleDay = range.startDate === range.endDate;
   const isToday = range.endDate === today && range.startDate === today;
+
+  // Dias úteis dentro do período → usado para rotular meta
+  const [sy, sm, sd] = range.startDate.split('-').map(Number);
+  const [ey, em, ed] = range.endDate.split('-').map(Number);
+  const periodWorkDays = countWorkDays(new Date(sy, sm - 1, sd), new Date(ey, em - 1, ed));
 
   // Realtime: only when viewing today
   useEffect(() => {
@@ -158,6 +164,28 @@ export default function DashboardPage() {
 
   const comercial = aggregateComercial(reports);
   const produto = aggregateProduto(reports);
+
+  /** Busca meta mensal por (mês, área, métrica). */
+  function monthlyGoal(month: string, area: string, metric: string): number | undefined {
+    return goals.find((g) => g.month === month && g.area === area && g.metric === metric)?.target;
+  }
+
+  /**
+   * Meta do período selecionado — proporcional aos dias úteis cobertos em cada mês.
+   * - 1 dia útil → meta diária
+   * - últimos 7 dias → ~5 dias úteis da meta mensal
+   * - mês até hoje → meta proporcional aos dias úteis já ocorridos
+   * - mês passado completo → meta cheia do mês
+   */
+  function periodTarget(area: string, metric: string): number | undefined {
+    return calcPeriodTarget(range.startDate, range.endDate, (m) => monthlyGoal(m, area, metric));
+  }
+
+  function targetLabel(): string {
+    if (periodWorkDays <= 0) return 'Meta';
+    if (periodWorkDays === 1) return 'Meta diária';
+    return `Meta (${periodWorkDays} dias úteis)`;
+  }
 
   const userArea = profile?.area;
   const userName = profile?.full_name?.split(' ')[0] ?? 'Você';
@@ -199,10 +227,6 @@ export default function DashboardPage() {
     };
   })();
 
-  function getGoal(area: string, metric: string) {
-    return goals.find((g) => g.area === area && g.metric === metric)?.target;
-  }
-
   return (
     <div className="space-y-8">
       {/* Date range picker */}
@@ -237,10 +261,8 @@ export default function DashboardPage() {
               title="Faturamento"
               value={comercial.faturamento}
               format="currency"
-              target={isSingleDay ? getGoal('comercial', 'faturamento') : undefined}
-              missingPerDay={isSingleDay && getGoal('comercial', 'faturamento')
-                ? getMissingPerDay(comercial.faturamento, getGoal('comercial', 'faturamento')!)
-                : undefined}
+              target={periodTarget('comercial', 'faturamento')}
+              targetLabel={targetLabel()}
               area="comercial"
               icon={DollarSign}
               donutData={comercialDonuts.faturamento}
@@ -248,10 +270,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Vendas"
               value={comercial.vendas}
-              target={isSingleDay ? getGoal('comercial', 'vendas') : undefined}
-              missingPerDay={isSingleDay && getGoal('comercial', 'vendas')
-                ? getMissingPerDay(comercial.vendas, getGoal('comercial', 'vendas')!)
-                : undefined}
+              target={periodTarget('comercial', 'vendas')}
+              targetLabel={targetLabel()}
               area="comercial"
               icon={ShoppingCart}
               donutData={comercialDonuts.vendas}
@@ -259,10 +279,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Agendamentos"
               value={comercial.agendamentos}
-              target={isSingleDay ? getGoal('comercial', 'agendamentos') : undefined}
-              missingPerDay={isSingleDay && getGoal('comercial', 'agendamentos')
-                ? getMissingPerDay(comercial.agendamentos, getGoal('comercial', 'agendamentos')!)
-                : undefined}
+              target={periodTarget('comercial', 'agendamentos')}
+              targetLabel={targetLabel()}
               area="comercial"
               icon={Calendar}
               donutData={comercialDonuts.agendamentos}
@@ -270,6 +288,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Calls Realizadas"
               value={comercial.callsRealizadas}
+              target={periodTarget('comercial', 'calls')}
+              targetLabel={targetLabel()}
               area="comercial"
               icon={PhoneCall}
               donutData={comercialDonuts.calls}
@@ -277,10 +297,8 @@ export default function DashboardPage() {
             <KpiCard
               title="Capturados"
               value={comercial.capturados}
-              target={isSingleDay ? getGoal('comercial', 'capturados') : undefined}
-              missingPerDay={isSingleDay && getGoal('comercial', 'capturados')
-                ? getMissingPerDay(comercial.capturados, getGoal('comercial', 'capturados')!)
-                : undefined}
+              target={periodTarget('comercial', 'capturados')}
+              targetLabel={targetLabel()}
               area="comercial"
               icon={Users}
               donutData={comercialDonuts.capturados}
@@ -300,14 +318,33 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard title="Atendimentos" value={produto.atendimentos} area="produto" donutData={produtoDonuts.atendimentos} />
-            <KpiCard title="Resolvidos" value={produto.resolvidos} area="produto" donutData={produtoDonuts.resolvidos} />
+            <KpiCard
+              title="Atendimentos"
+              value={produto.atendimentos}
+              target={periodTarget('produto', 'atendimentos')}
+              targetLabel={targetLabel()}
+              area="produto"
+              donutData={produtoDonuts.atendimentos}
+            />
+            <KpiCard
+              title="Resolvidos"
+              value={produto.resolvidos}
+              target={periodTarget('produto', 'resolvidos')}
+              targetLabel={targetLabel()}
+              area="produto"
+              donutData={produtoDonuts.resolvidos}
+            />
             <KpiCard
               title="TMR Médio"
               value={produto.tmrMedio}
               format="time"
               area="produto"
               semaphore={produto.tmrSemaphore}
+              targetHint={(() => {
+                // TMR é um teto, não escala com período: usa o do mês inicial da faixa
+                const tmr = monthlyGoal(rangeMonths[0], 'produto', 'tmr_horas');
+                return tmr != null ? `Meta: até ${tmr}h` : undefined;
+              })()}
             />
             <KpiCard title="Bloqueios" value={produto.bloqueios} area="produto" donutData={produtoDonuts.bloqueios} />
           </div>

@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { Plus, Check, X, Target, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useProfile } from '@/hooks/useProfile';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
-import { formatCurrency } from '@/lib/utils';
+import { useProfile } from '@/hooks/useProfile';
 import { createClient } from '@/lib/supabase/client';
+import { formatCurrency } from '@/lib/utils';
 import type { MonthlyGoal } from '@/types/database';
+import { Check, ChevronLeft, ChevronRight, Plus, Target, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 
 type Area = 'produto' | 'comercial' | 'geral';
 
@@ -239,7 +239,7 @@ export default function GestaoPage() {
       </div>
 
       {/* Annual goals table */}
-      <div className="bg-surface rounded-xl border border-outline-variant overflow-x-auto">
+      <div className="bg-surface rounded-sm border border-outline-variant overflow-x-auto">
         <table className="w-full min-w-max">
           <thead>
             <tr className="border-b border-outline-variant bg-surface-container/40">
