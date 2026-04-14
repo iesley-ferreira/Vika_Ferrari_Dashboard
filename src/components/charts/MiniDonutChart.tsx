@@ -50,24 +50,16 @@ export function MiniDonutChart({ data, size = 72, formatValue }: MiniDonutChartP
     series.labels.template.set('forceHidden', true);
     series.ticks.template.set('forceHidden', true);
 
-    // Stroke fino para não comer fatias pequenas; sem cornerRadius (quebra hit-area em fatias minúsculas)
-    series.slices.template.setAll({
-      tooltipText: '[bold]{category}[/]: {valueFormatted}',
-      strokeWidth: 1,
-      stroke: am5.color('#ffffff'),
+    /* ── Tooltip ─────────────────────────────────────────── */
+    const tooltip = am5.Tooltip.new(root, {
+      pointerOrientation: 'horizontal',
     });
-
-    series.slices.template.states.create('hover', {
-      shiftRadius: 6,
-      scale: 1.05,
-    });
-
-    const tooltip = am5.Tooltip.new(root, {});
-    tooltip.get('background')?.setAll({
-      cornerRadiusTL: 6,
-      cornerRadiusTR: 6,
-      cornerRadiusBL: 6,
-      cornerRadiusBR: 6,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (tooltip.get('background') as any)?.setAll({
+      cornerRadiusTL: 8,
+      cornerRadiusTR: 8,
+      cornerRadiusBL: 8,
+      cornerRadiusBR: 8,
     });
     tooltip.label.setAll({
       textAlign: 'center',
@@ -75,28 +67,51 @@ export function MiniDonutChart({ data, size = 72, formatValue }: MiniDonutChartP
     });
     series.set('tooltip', tooltip);
 
-    series.slices.template.adapters.add('fill', (fill, target) => {
-      const ctx = target.dataItem?.dataContext as DonutSlice | undefined;
-      if (ctx?.color) return am5.color(ctx.color);
-      return fill;
+    /* ── Fatias ──────────────────────────────────────────── */
+    // Legenda em cima (bold) + valor embaixo; usa {valueFormatted} do dataContext
+    // templateField aplica fill/stroke per-slice SEM adapters (cross-browser safe)
+    series.slices.template.setAll({
+      tooltipText: '[align=center][bold]{category}[/]\n{valueFormatted}[/]',
+      strokeWidth: 0.5,
+      stroke: am5.color(0xffffff),
+      strokeOpacity: 0.7,
+      cursorOverStyle: 'pointer',
+      toggleKey: 'none',
+      templateField: 'sliceSettings',
     });
-    series.slices.template.adapters.add('stroke', () => am5.color('#ffffff'));
 
-    // Injeta valor formatado no dataItem para uso em tooltipText
-    const formatted = data.map((d) => ({
+    // Hover state: explosão
+    series.slices.template.states.create('hover', {
+      shiftRadius: 6,
+      scale: 1.05,
+    });
+
+    /* ── Dados ───────────────────────────────────────────── */
+    // Embute cores e valor formatado no data para evitar adapters
+    const chartData = data.map((d) => ({
       ...d,
       valueFormatted: formatRef.current ? formatRef.current(d.value) : String(d.value),
+      sliceSettings: {
+        fill: d.color ? am5.color(d.color) : undefined,
+        stroke: am5.color(0xffffff),
+      },
     }));
 
-    series.data.setAll(formatted);
+    series.data.setAll(chartData);
     series.appear(800);
+    chart.appear(800, 100);
 
+    /* ── Overflow visível para tooltip escapar ────────────── */
     const container = ref.current;
     if (container) {
       container.style.overflow = 'visible';
-      container.querySelectorAll('svg').forEach((svg) => {
-        (svg as SVGElement).style.overflow = 'visible';
-      });
+      const applyOverflow = () => {
+        container.querySelectorAll('canvas, svg').forEach((el) => {
+          (el as HTMLElement).style.overflow = 'visible';
+        });
+      };
+      applyOverflow();
+      setTimeout(applyOverflow, 900);
     }
 
     return () => root.dispose();
@@ -105,5 +120,18 @@ export function MiniDonutChart({ data, size = 72, formatValue }: MiniDonutChartP
 
   if (data.length === 0) return null;
 
-  return <div ref={ref} style={{ width: size, height: size, flexShrink: 0 }} />;
+  return (
+    <div
+      ref={ref}
+      style={{
+        width: size,
+        height: size,
+        flexShrink: 0,
+        overflow: 'visible',
+        position: 'relative',
+        zIndex: 10,
+      }}
+    />
+  );
 }
+

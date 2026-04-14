@@ -17,6 +17,16 @@ function formatValue(value: number, fmt: Format): string {
   return value.toLocaleString('pt-BR');
 }
 
+/** Formato compacto para tooltip do donut: 30000→30k, 1500→1,5k */
+function formatCompact(value: number): string {
+  if (value >= 1000) {
+    const k = value / 1000;
+    if (k === Math.floor(k)) return `${k}k`;
+    return `${k.toFixed(1).replace('.', ',')}k`;
+  }
+  return value.toLocaleString('pt-BR');
+}
+
 // Separa "R$" do número para renderização diferenciada
 function splitCurrency(value: number): { symbol: string; amount: string } {
   const formatted = formatCurrency(value);
@@ -101,7 +111,7 @@ export function KpiCard({
           <MiniDonutChart
             data={donutData!}
             size={64}
-            formatValue={(v) => formatValue(v, format)}
+            formatValue={(v) => format === 'currency' ? formatCompact(v) : formatValue(v, format)}
           />
         )}
       </div>

@@ -82,7 +82,7 @@ function makeTwoSlice(
   const teamValue = Math.max(0, total - userValue);
   if (userValue <= 0 || teamValue <= 0) return [];
   return [
-    { name: userName, value: userValue, color: DONUT_USER_COLOR },
+    { name: 'Eu', value: userValue, color: DONUT_USER_COLOR },
     { name: 'Equipe', value: teamValue, color: teamColor },
   ];
 }
